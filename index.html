@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบติดตามสถานการณ์น้ำและแจ้งเตือน LINE - C.46, C.7A, C.47</title>
+  <meta name="description" content="แดชบอร์ดติดตามสถานการณ์น้ำรายวัน สถานี C.46, C.7A, C.47 พร้อมระบบจำลองและแจ้งเตือนผ่าน LINE Messaging API">
+  
+  <!-- CSS Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+  
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- แถบเมนูด้านบน (Navbar) -->
+  <header class="navbar">
+    <div class="brand-container">
+      <div class="brand-logo">🌊</div>
+      <div>
+        <h1 class="brand-title">ระบบติดตามสถานการณ์น้ำและแจ้งเตือน LINE</h1>
+        <div class="brand-subtitle">สถานีหลัก: C.46 (ไชโย), C.7A (เมืองอ่างทอง), C.47 (ป่าโมก) | แม่น้ำเจ้าพระยา จ.อ่างทอง</div>
+      </div>
+    </div>
+    <div class="nav-actions">
+      <button id="btnFetchRid" class="btn btn-primary btn-sm">
+        ⚡ ดึงข้อมูลสดจาก RID
+      </button>
+      <span class="sync-status">
+        🕒 ข้อมูล ณ: <strong id="lastUpdatedText">--:--:--</strong>
+      </span>
+      <a href="https://hyd-app-db.rid.go.th/hydro5hd_admsl.html" target="_blank" class="btn btn-outline btn-sm">
+        🌐 กรมชลประทาน (RID)
+      </a>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ป้ายสรุปและปุ่มเปลี่ยนสถานการณ์ด่วน (Quick Presets) -->
+    <section class="quick-summary-banner">
+      <div class="quick-summary-info">
+        <h2>📊 แดชบอร์ดสถานการณ์น้ำรายวัน & ระบบฝึกอบรมทีมงาน</h2>
+        <p>สามารถปรับระดับน้ำและเกณฑ์เตือนภัยได้แบบ Real-time เพื่อทดสอบระบบประเมินสถานะและข้อความแจ้งเตือน LINE Flex Message</p>
+      </div>
+      <div class="quick-preset-buttons">
+        <button class="btn btn-light btn-preset" data-scenario="normal">
+          🟢 สภาวะปกติ
+        </button>
+        <button class="btn btn-light btn-preset" data-scenario="warning">
+          🟡 สภาวะเฝ้าระวัง
+        </button>
+        <button class="btn btn-light btn-preset" data-scenario="critical">
+          🔴 สภาวะวิกฤต/น้ำท่วม
+        </button>
+        <button id="btnAutoFluctuate" class="btn btn-outline" style="background: rgba(255,255,255,0.2); color: white; border-color: rgba(255,255,255,0.4);">
+          ▶️ จำลองน้ำขึ้น-ลงอัตโนมัติ
+        </button>
+      </div>
+    </section>
+
+    <!-- ส่วนแสดงการ์ดสถานะของ 3 สถานีหลัก -->
+    <section>
+      <div class="section-title">
+        <h2>📍 สถานะระดับน้ำปัจจุบัน (C.46, C.7A, C.47)</h2>
+        <button id="btnResetDefault" class="btn btn-outline btn-sm">
+          🔄 รีเซ็ตเป็นค่ามาตรฐาน RID
+        </button>
+      </div>
+      <div class="station-grid" id="stationCardsContainer">
+        <!-- Station Cards will be dynamically injected by app.js -->
+      </div>
+    </section>
+
+    <!-- ส่วนควบคุมการทดสอบ (Simulator) และกราฟสถิติ (Charts) -->
+    <section class="layout-split">
+      
+      <!-- คอลัมน์ซ้าย: แผงควบคุมและจำลองระดับน้ำ (Simulator Panel) -->
+      <div class="panel-card">
+        <div class="section-title">
+          <h3>🛠️ แผงปรับระดับน้ำ & ตั้งค่าเกณฑ์เตือนภัย</h3>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+          ทดลองเลื่อนแถบระดับน้ำหรือเปลี่ยนเกณฑ์เฝ้าระวัง/วิกฤต เพื่อดูการเปลี่ยนสถานะแบบทันที
+        </p>
+
+        <!-- เลือกสถานีที่ต้องการปรับ -->
+        <div class="form-group">
+          <label class="form-label" for="simStationSelect">เลือกสถานีที่ต้องการปรับค่า:</label>
+          <select id="simStationSelect" class="form-control">
+            <option value="C.46">สถานี C.46 (อ.ไชโย จ.อ่างทอง)</option>
+            <option value="C.7A">สถานี C.7A (หน้าศาลากลาง อ.เมืองอ่างทอง)</option>
+            <option value="C.47">สถานี C.47 (อ.ป่าโมก จ.อ่างทอง)</option>
+          </select>
+        </div>
+
+        <!-- แถบเลื่อนปรับระดับน้ำปัจจุบัน -->
+        <div class="form-group">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label class="form-label" style="margin-bottom: 0;">ระดับน้ำปัจจุบัน (ม.รทก.):</label>
+            <span class="slider-value-badge"><span id="simCurrentLevelVal">0.00</span> ม.</span>
+          </div>
+          <div class="slider-container">
+            <input type="range" id="simCurrentLevel" class="range-slider" min="20" max="300" step="0.05">
+          </div>
+        </div>
+
+        <!-- ปรับเกณฑ์เตือนภัยและระดับตลิ่ง -->
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="simWarningLevel">🟡 เกณฑ์เฝ้าระวัง (ม.รทก.):</label>
+            <input type="number" id="simWarningLevel" class="form-control" step="0.1">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="simCriticalLevel">🔴 เกณฑ์วิกฤต (ม.รทก.):</label>
+            <input type="number" id="simCriticalLevel" class="form-control" step="0.1">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="simBankLevel">🏁 ระดับตลิ่ง (ม.รทก.):</label>
+            <input type="number" id="simBankLevel" class="form-control" step="0.1">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="simFlowRate">🌊 ปริมาณน้ำไหล (cms):</label>
+            <input type="number" id="simFlowRate" class="form-control" step="10">
+          </div>
+        </div>
+
+        <div class="alert-box alert-info" style="margin-top: 1rem;">
+          💡 <strong>การประเมินสถานะอัตโนมัติ:</strong><br>
+          • <strong>ปกติ:</strong> ระดับน้ำ &lt; เกณฑ์เฝ้าระวัง<br>
+          • <strong>เฝ้าระวัง:</strong> เกณฑ์เฝ้าระวัง &le; ระดับน้ำ &lt; เกณฑ์วิกฤต<br>
+          • <strong>เตือนภัย/วิกฤต:</strong> ระดับน้ำ &ge; เกณฑ์วิกฤต หรือ ล้นระดับตลิ่ง
+        </div>
+      </div>
+
+      <!-- คอลัมน์ขวา: กราฟสถิติ (Statistics Charts) -->
+      <div class="panel-card">
+        <div class="section-title">
+          <h3>📈 กราฟแนวโน้มและสถิติเปรียบเทียบ</h3>
+          <select id="chartStationSelect" class="form-control" style="width: auto; padding: 4px 8px; font-size: 0.85rem;">
+            <option value="C.46">ดูกราฟ C.46 (ไชโย)</option>
+            <option value="C.7A">ดูกราฟ C.7A (เมืองอ่างทอง)</option>
+            <option value="C.47">ดูกราฟ C.47 (ป่าโมก)</option>
+          </select>
+        </div>
+
+        <!-- กราฟระดับน้ำย้อนหลัง -->
+        <div class="chart-container">
+          <canvas id="historyChart"></canvas>
+        </div>
+
+        <!-- กราฟเปรียบเทียบ 3 สถานี -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 1rem;">
+          <div style="height: 170px;">
+            <canvas id="comparisonChart"></canvas>
+          </div>
+          <div style="height: 170px;">
+            <canvas id="flowChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ส่วนทดสอบ LINE Messaging API & LINE Flex Message -->
+    <section>
+      <div class="section-title">
+        <h2>💬 ห้องทดลอง LINE Messaging API & พรีวิว Flex Message</h2>
+      </div>
+
+      <div class="line-section">
+        
+        <!-- ซ้าย: ฟอร์มส่งและตั้งค่า LINE API -->
+        <div>
+          <h3>⚙️ ตั้งค่าและทดสอบส่งข้อความจริง</h3>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1.25rem;">
+            นำ <strong>Channel Access Token</strong> จาก <a href="https://developers.line.biz/" target="_blank">LINE Developers Console</a> มาใส่เพื่อทดสอบส่งแจ้งเตือนจริงเข้า LINE ของคุณ
+          </p>
+
+          <div class="form-group">
+            <label class="form-label" for="lineTokenInput">LINE Channel Access Token (Long-lived):</label>
+            <input type="password" id="lineTokenInput" class="form-control" placeholder="ใส่ Channel Access Token ที่ได้จาก LINE Developers...">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="lineTargetInput">User ID หรือ Group ID ผู้รับ:</label>
+            <input type="text" id="lineTargetInput" class="form-control" placeholder="เช่น U1234567890abcdef... หรือพิมพ์ broadcast">
+            <small style="color: var(--text-muted); font-size: 0.75rem;">
+              * พิมพ์ <code>broadcast</code> หากต้องการส่งให้ทุกคนที่เป็นเพื่อนกับบอท (สำหรับทดสอบส่งกระจาย)
+            </small>
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 1.5rem;">
+            <button id="btnSendLine" class="btn btn-primary" style="flex: 2;">
+              🚀 ส่งข้อความทดสอบเข้า LINE
+            </button>
+            <button id="btnCopyJson" class="btn btn-outline" style="flex: 1;">
+              📋 คัดลอก JSON
+            </button>
+          </div>
+
+          <div id="lineStatusAlert" style="display: none;"></div>
+
+          <div style="margin-top: 1.5rem;">
+            <label class="form-label">📦 โครงสร้าง JSON ของ Flex Message (Payload):</label>
+            <div id="jsonPayloadPreview" class="code-viewer"></div>
+          </div>
+        </div>
+
+        <!-- ขวา: หน้าจอมือถือจำลอง (LINE Chat Mockup) -->
+        <div>
+          <h3 style="text-align: center; margin-bottom: 1rem;">📱 ตัวอย่างข้อความที่จะแสดงใน LINE (Live Preview)</h3>
+          
+          <div class="phone-mockup">
+            <div class="phone-screen">
+              <div class="phone-header-bar">
+                <span>🤖 บอทรายงานสถานการณ์น้ำ</span>
+              </div>
+              <div id="flexPreviewContent">
+                <!-- Flex Card Preview will be injected here -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+    <!-- ส่วนที่ 4: ตั้งเวลาแจ้งเตือนอัตโนมัติ (Custom Schedule & Quota Saver) -->
+    <section class="simulator-section" style="margin-top: 2rem;">
+      <div class="section-title">
+        <span>⏰</span>
+        <h2>ตั้งเวลาแจ้งเตือนอัตโนมัติ (ประหยัดโควต้า LINE วันละ 4 รอบ)</h2>
+      </div>
+      <p class="section-desc">
+        กำหนดรอบเวลาส่งสรุปสถานการณ์น้ำเข้า LINE อัตโนมัติ (เช่น วันละ 4 รอบ 09:30, 12:30, 15:30, 18:30 น.) หรือตั้งเวลาที่ต้องการเองได้
+      </p>
+
+      <div style="background: #ffffff; padding: 1.5rem; border-radius: 12px; border: 1px solid var(--border-color); box-shadow: var(--shadow);">
+        <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-bottom: 1rem;">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="chkTime0930" checked>
+            <strong>🌅 09:30 น. (เช้า)</strong>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="chkTime1230" checked>
+            <strong>☀️ 12:30 น. (เที่ยง)</strong>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="chkTime1530" checked>
+            <strong>🌤️ 15:30 น. (บ่าย)</strong>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="chkTime1830" checked>
+            <strong>🌆 18:30 น. (เย็น)</strong>
+          </label>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-top: 10px; border-top: 1px dashed var(--border-color);">
+          <label for="customTimeInput">➕ เพิ่มเวลาแจ้งเตือนอื่น:</label>
+          <input type="time" id="customTimeInput" class="form-control" style="width: 140px;">
+          <button id="btnAddCustomTime" class="btn btn-outline btn-sm">เพิ่มเวลา</button>
+          <span id="activeScheduleBadge" style="background: #e0f2fe; color: #0369a1; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; font-weight: 500;">
+            รอบเวลาที่เปิดใช้งาน: 09:30, 12:30, 15:30, 18:30 น.
+          </span>
+        </div>
+
+        <div style="margin-top: 1rem; font-size: 0.85rem; color: #64748b; line-height: 1.6;">
+          💡 <strong>การใช้งาน:</strong>
+          <br>• บน <strong>GitHub Actions:</strong> ระบบตั้งค่าเวลา 09:30, 12:30, 15:30, 18:30 น. ไว้ให้อัตโนมัติบน Cloud ไม่ต้องเปิดคอมพ์ทิ้งไว้
+          <br>• บน <strong>เครื่องคอมพิวเตอร์ (Local):</strong> ดับเบิ้ลคลิกไฟล์ <code>run_schedule_4times.bat</code> เพื่อรันบอทรอส่งตามเวลาที่ตั้งไว้
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <div class="container">
+      <p>โปรเจกต์แดชบอร์ดฝึกอบรมสถานการณ์น้ำและ LINE Messaging API | สถานี C.46, C.7A, C.47</p>
+      <p style="margin-top: 4px; font-size: 0.8rem; color: #94a3b8;">
+        อ้างอิงข้อมูล: <a href="https://hyd-app-db.rid.go.th/hydro5hd_admsl.html" target="_blank" style="color: var(--primary);">Real time Hydro data - กรมชลประทาน (RID)</a> | รองรับ Localhost และ GitHub Pages
+      </p>
+    </div>
+  </footer>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/mock-data.js"></script>
+  <script src="js/live-data.js"></script>
+  <script src="js/live-rid-fetcher.js"></script>
+  <script src="js/line-service.js"></script>
+  <script src="js/chart-manager.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
