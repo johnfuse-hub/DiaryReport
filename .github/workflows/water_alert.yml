@@ -2,16 +2,24 @@
 # -*- coding: utf-8 -*-
 """
 water_monitor.py - ระบบตรวจสอบสถานการณ์น้ำรายชั่วโมง C.46, C.7A, C.47 จ.อ่างทอง
+ปรับเวลาให้ตรงกับเวลาประเทศไทย (UTC+7 / Asia/Bangkok) อย่างแม่นยำ 100% แม้รันบน GitHub Actions
 """
 
 import os
 import sys
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import requests
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# กำหนด Timezone ประเทศไทย (UTC+7)
+THAI_TZ = timezone(timedelta(hours=7))
+
+def get_thai_now():
+    """ดึงเวลาปัจจุบันตามเวลาประเทศไทย (UTC+7) เสมอ แม้เซิร์ฟเวอร์จะอยู่ต่างประเทศ"""
+    return datetime.now(THAI_TZ)
 
 # ข้อมูลสถานีพร้อมค่าสำรองความปลอดภัยครบทุกตัว
 STATIONS_DATA = {
@@ -67,9 +75,9 @@ def clean_flow(val):
         return "-"
 
 def fetch_rid_hourly_data():
-    now = datetime.now()
-    buddhist_year = now.year + 543
-    thai_date_str = f"{now.day:02d}/{now.month:02d}/{buddhist_year}"
+    now_thai = get_thai_now()
+    buddhist_year = now_thai.year + 543
+    thai_date_str = f"{now_thai.day:02d}/{now_thai.month:02d}/{buddhist_year}"
 
     params = {
         "DW[StationGroupID]": "1272",
@@ -119,7 +127,7 @@ def fetch_rid_hourly_data():
                     st["currentLevel"] = last["level"]
                     st["flowRate"] = last["flow"]
                     st["latestHour"] = last["hour"]
-            print("✅ ดึงข้อมูลระดับน้ำสดจาก RID สำเร็จเรียบร้อย")
+            print(f"✅ ดึงข้อมูลระดับน้ำสดจาก RID สำเร็จเรียบร้อย (วันที่: {thai_date_str})")
     except Exception as e:
         print(f"⚠️ การเชื่อมต่อ RID ล่าช้า ({e}) -> ใช้ข้อมูลล่าสุดประจำวัน")
 
@@ -133,7 +141,8 @@ def evaluate_status(current, warning, critical):
     return {"code": "normal", "label": "ปกติ", "icon": "🟢", "color": "#10b981", "bgColor": "#ecfdf5", "borderColor": "#a7f3d0"}
 
 def build_flex_payload(stations):
-    now_str = datetime.now().strftime("%d/%m/%Y %H:%M น.")
+    now_thai = get_thai_now()
+    now_str = now_thai.strftime("%d/%m/%Y %H:%M น.")
     boxes = []
     c_crit = 0
     c_warn = 0
@@ -191,7 +200,7 @@ def build_flex_payload(stations):
 
     return {
         "type": "flex",
-        "altText": f"{header_title} - ข้อมูลแม่น้ำเจ้าพระยา จ.อ่างทอง",
+        "altText": f"{header_title} - ข้อมูลแม่น้ำเจ้าพระยา จ.อ่างทอง ({now_str})",
         "contents": {
             "type": "bubble",
             "size": "mega",
@@ -211,7 +220,7 @@ def build_flex_payload(stations):
                 "layout": "vertical",
                 "paddingAll": "16px",
                 "contents": [
-                    {"type": "text", "text": f"🕒 ข้อมูล Real-time ณ: {now_str}", "size": "xxs", "color": "#64748b"},
+                    {"type": "text", "text": f"🕒 ข้อมูล ณ เวลาไทย: {now_str}", "size": "xxs", "color": "#64748b"},
                     {"type": "separator", "margin": "sm"},
                     *boxes
                 ]
@@ -237,7 +246,7 @@ def main():
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     target = os.getenv("LINE_USER_ID", "broadcast").strip()
 
-    print("🌊 กำลังประมวลผลข้อมูลสถานการณ์น้ำ...")
+    print(f"🌊 กำลังประมวลผลข้อมูลสถานการณ์น้ำ ณ เวลาไทย: {get_thai_now().strftime('%d/%m/%Y %H:%M:%S น.')}...")
     stations = fetch_rid_hourly_data()
     payload = build_flex_payload(stations)
 
@@ -246,13 +255,4 @@ def main():
         sys.exit(1)
 
     is_broadcast = target.lower() == "broadcast"
-    endpoint = "https://api.line.me/v2/bot/message/broadcast" if is_broadcast else "https://api.line.me/v2/bot/message/push"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
-    body = {"messages": [payload]}
-    if not is_broadcast:
-        body["to"] = target
-
-    print(f"🚀 กำลังส่งข้อความไปยัง LINE API ({'Broadcast' if is_broadcast else target})...")
-    res = requests.post(endpoint, headers=headers, json=body, timeout=15)
-    if res.status_code == 200:
-        print("✅ ส่งแจ้งเตือน LINE Flex Message สำเ
+    endpoint = "https://api.line.me/v2/bot/message/broadcast" if is_broadcast
